@@ -5,6 +5,13 @@ struct EtEyoConversationScreen: View {
     let destination: EtEyoConversation
     let color: Color
     var participantSummary: String = "Private chat"
+    @EnvironmentObject private var publicChat: PublicChatModel
+    @EnvironmentObject private var privateChat: PrivateConversationModel
+    @EnvironmentObject private var conversationUI: ConversationUIModel
+    @EnvironmentObject private var channels: LocationChannelsModel
+    @EnvironmentObject private var peers: PeerListModel
+    @State private var meshText = ""
+    @State private var meshCommand: String?
     @EnvironmentObject private var store: EtEyoConversationStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -13,10 +20,57 @@ struct EtEyoConversationScreen: View {
     @State private var composerHeight: CGFloat = 68
     @State private var previewNotice: String?
 
+    private var isMesh: Bool { destination == .location("mesh") }
+
+    private var headerSubtitle: String {
+        guard isMesh else { return participantSummary }
+        let count = peers.reachableMeshPeerCount + 1
+        return count == 1 ? "1 person" : "\(count) people"
+    }
+
+    private struct TimelineMessage: Identifiable {
+        let id: String
+        let text: String
+        let date: Date
+        let sender: String
+        let isMine: Bool
+    }
+
+    private var messages: [TimelineMessage] {
+        if isMesh {
+            guard publicChat.activeChannel == .mesh else { return [] }
+            return publicChat.messages.map {
+                TimelineMessage(id: $0.id, text: $0.content, date: $0.timestamp,
+                                sender: $0.sender, isMine: conversationUI.isSentByCurrentUser($0))
+            }
+        }
+        return draft.messages.map {
+            TimelineMessage(id: $0.id.uuidString, text: $0.text, date: $0.date, sender: "", isMine: true)
+        }
+    }
+
+    private func sendMessage() {
+        guard isMesh else { store.send(to: destination); return }
+        let value = meshText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        guard publicChat.activeChannel == .mesh, privateChat.selectedPeerID == nil else {
+            previewNotice = "Reopen mesh before sending a message."
+            return
+        }
+        let alias = value.split(whereSeparator: { $0.isWhitespace }).first?.lowercased()
+        if alias == "/msg" || alias == "/group" {
+            previewNotice = "Private and group chats will be connected in the next step."
+            return
+        }
+        conversationUI.sendMessage(value)
+        meshText = ""
+    }
+
     private var draft: EtEyoConversationDraft { store.draft(for: destination) }
 
     private var text: Binding<String> {
-        Binding(get: { draft.text }, set: { value in
+        if isMesh { return $meshText }
+        return Binding(get: { draft.text }, set: { value in
             var updated = draft
             updated.text = value
             store.update(updated, for: destination)
@@ -24,7 +78,8 @@ struct EtEyoConversationScreen: View {
     }
 
     private var command: Binding<String?> {
-        Binding(get: { draft.command }, set: { value in
+        if isMesh { return $meshCommand }
+        return Binding(get: { draft.command }, set: { value in
             var updated = draft
             updated.command = value
             store.update(updated, for: destination)
@@ -41,7 +96,7 @@ struct EtEyoConversationScreen: View {
                     text: text,
                     command: command,
                     focused: $focused,
-                    send: { store.send(to: destination) },
+                    send: sendMessage,
                     attach: { previewNotice = "Attachments aren't available in this preview yet." },
                     heightChanged: { composerHeight = $0 }
                 )
@@ -71,7 +126,7 @@ struct EtEyoConversationScreen: View {
                         .font(.system(size: 15, weight: .medium))
                         .tracking(0.1)
                         .foregroundStyle(.white)
-                    Text(participantSummary)
+                    Text(headerSubtitle)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -95,6 +150,12 @@ struct EtEyoConversationScreen: View {
         }
         .tint(.white)
         .navigationBarBackButtonHidden()
+        .onAppear {
+            if isMesh {
+                privateChat.endConversation()
+                channels.select(.mesh)
+            }
+        }
         .onDisappear { store.save() }
         .onChange(of: scenePhase) { if $0 != .active { store.save() } }
         .alert("Preview", isPresented: Binding(
@@ -111,7 +172,7 @@ struct EtEyoConversationScreen: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    if draft.messages.isEmpty {
+                    if messages.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "bubble.left.and.bubble.right")
                                 .font(.system(size: 28, weight: .light))
@@ -125,10 +186,15 @@ struct EtEyoConversationScreen: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 64)
                     }
-                    ForEach(draft.messages) { message in
+                    ForEach(messages) { message in
                         HStack {
-                            Spacer(minLength: 40)
-                            VStack(alignment: .trailing, spacing: 5) {
+                            if message.isMine { Spacer(minLength: 40) }
+                            VStack(alignment: message.isMine ? .trailing : .leading, spacing: 5) {
+                                if !message.isMine {
+                                    Text(message.sender)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                }
                                 Text(message.text)
                                     .font(.system(size: 16))
                                     .textSelection(.enabled)
@@ -141,6 +207,7 @@ struct EtEyoConversationScreen: View {
                                     .padding(.trailing, 4)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: message.isMine ? .trailing : .leading)
                         .id(message.id)
                     }
                     Color.clear.frame(height: 1).id("bottom")
@@ -150,7 +217,7 @@ struct EtEyoConversationScreen: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
-            .onChange(of: draft.messages.count) { _ in
+            .onChange(of: messages.count) { _ in
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
