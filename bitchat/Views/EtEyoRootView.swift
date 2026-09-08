@@ -1,4 +1,5 @@
 import BitFoundation
+import CoreBluetooth
 import SwiftUI
 
 #if os(iOS)
@@ -11,6 +12,9 @@ struct EtEyoRootView: View {
         #endif
     }
 
+    @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var channels: LocationChannelsModel
+    @State private var startupPermissions = EtEyoStartupPermissions()
     @State private var selectedTab: Tab = .locations
     @State private var destination: EtEyoConversation?
     @StateObject private var drafts = EtEyoConversationStore()
@@ -38,6 +42,9 @@ struct EtEyoRootView: View {
         .tint(.accentColor)
         .preferredColorScheme(.dark)
         .environmentObject(drafts)
+        .onAppear(perform: requestStartupPermissions)
+        .onChange(of: scenePhase) { _ in requestStartupPermissions() }
+        .onChange(of: chrome.bluetoothState) { _ in requestStartupPermissions() }
         .fullScreenCover(item: $destination, onDismiss: {
             privateChat.endConversation()
         }) { conversation in
@@ -55,6 +62,17 @@ struct EtEyoRootView: View {
             guard destination == nil, let peer else { return }
             destination = .person(peer, privateChat.selectedHeaderState?.displayName ?? "Private chat")
         }
+    }
+
+    private func requestStartupPermissions() {
+        guard !TestEnvironment.isRunningTests else { return }
+        guard startupPermissions.takeLocationRequest(
+            isActive: scenePhase == .active,
+            bluetoothAuthorization: CBManager.authorization,
+            bluetoothState: chrome.bluetoothState,
+            locationPermission: channels.permissionState
+        ) else { return }
+        channels.enableAndRefresh()
     }
 
     private func open(_ conversation: EtEyoConversation) { destination = conversation }
