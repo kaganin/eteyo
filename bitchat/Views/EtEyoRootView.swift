@@ -16,12 +16,38 @@ struct EtEyoRootView: View {
     @EnvironmentObject private var channels: LocationChannelsModel
     @State private var startupPermissions = EtEyoStartupPermissions()
     @State private var selectedTab: Tab = .locations
-    @State private var destination: EtEyoConversation?
+    @State private var path: [EtEyoConversation] = []
     @StateObject private var drafts = EtEyoConversationStore()
     @EnvironmentObject private var privateChat: PrivateConversationModel
     @EnvironmentObject private var chrome: AppChromeModel
 
     var body: some View {
+        NavigationStack(path: $path) {
+            tabs
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: EtEyoConversation.self) { conversation in
+                    EtEyoConversationScreen(destination: conversation,
+                        path: $path, open: open)
+                }
+        }
+        .tint(.accentColor)
+        .preferredColorScheme(.dark)
+        .environmentObject(drafts)
+        .onAppear(perform: requestStartupPermissions)
+        .onChange(of: scenePhase) { _ in requestStartupPermissions() }
+        .onChange(of: chrome.bluetoothState) { _ in requestStartupPermissions() }
+        .onChange(of: path) { if $0.isEmpty { privateChat.endConversation() } }
+        .onChange(of: privateChat.selectedPeerID) { peer in
+            #if DEBUG
+            guard selectedTab != .debug else { return }
+            #endif
+            // Notification and deep-link selections use the same conversation screen.
+            guard path.isEmpty, let peer else { return }
+            open(.person(peer, privateChat.selectedHeaderState?.displayName ?? "Private chat"))
+        }
+    }
+
+    private var tabs: some View {
         TabView(selection: $selectedTab) {
             EtEyoLocationsScreen(open: open)
                 .tabItem { Label("Locations", systemImage: "location") }
@@ -39,29 +65,6 @@ struct EtEyoRootView: View {
                 .tag(Tab.debug)
             #endif
         }
-        .tint(.accentColor)
-        .preferredColorScheme(.dark)
-        .environmentObject(drafts)
-        .onAppear(perform: requestStartupPermissions)
-        .onChange(of: scenePhase) { _ in requestStartupPermissions() }
-        .onChange(of: chrome.bluetoothState) { _ in requestStartupPermissions() }
-        .fullScreenCover(item: $destination, onDismiss: {
-            privateChat.endConversation()
-        }) { conversation in
-            NavigationStack {
-                EtEyoConversationScreen(destination: conversation)
-            }
-            .environmentObject(drafts)
-            .preferredColorScheme(.dark)
-        }
-        .onChange(of: privateChat.selectedPeerID) { peer in
-            #if DEBUG
-            guard selectedTab != .debug else { return }
-            #endif
-            // Notification and deep-link selections use the same conversation screen.
-            guard destination == nil, let peer else { return }
-            destination = .person(peer, privateChat.selectedHeaderState?.displayName ?? "Private chat")
-        }
     }
 
     private func requestStartupPermissions() {
@@ -75,7 +78,14 @@ struct EtEyoRootView: View {
         channels.enableAndRefresh()
     }
 
-    private func open(_ conversation: EtEyoConversation) { destination = conversation }
+    private func open(_ conversation: EtEyoConversation) {
+        // Reopening a conversation returns to its existing place in the stack.
+        if let index = path.firstIndex(where: { $0.id == conversation.id }) {
+            path = Array(path.prefix(through: index))
+        } else {
+            path.append(conversation)
+        }
+    }
 }
 
 struct EtEyoChatsScreen: View {

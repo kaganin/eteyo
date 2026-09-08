@@ -4,6 +4,8 @@ import SwiftUI
 #if os(iOS)
 struct EtEyoConversationScreen: View {
     let destination: EtEyoConversation
+    @Binding var path: [EtEyoConversation]
+    let open: (EtEyoConversation) -> Void
     @State private var target: EtEyoConversation
     @EnvironmentObject private var publicChat: PublicChatModel
     @EnvironmentObject private var privateChat: PrivateConversationModel
@@ -20,16 +22,19 @@ struct EtEyoConversationScreen: View {
     @State private var composerHeight: CGFloat = 68
     @State private var notice: String?
     @State private var hasAppeared = false
-    @State private var didActivate = false
     @State private var showPeople = false
     @State private var showClearConfirmation = false
     @State private var imageDestination: EtEyoConversation?
     @State private var imagePreviewURL: URL?
 
-    init(destination: EtEyoConversation) {
+    init(destination: EtEyoConversation, path: Binding<[EtEyoConversation]>, open: @escaping (EtEyoConversation) -> Void) {
         self.destination = destination
+        _path = path
+        self.open = open
         _target = State(initialValue: destination)
     }
+
+    private var isActive: Bool { path.last?.id == destination.id }
 
     private var ready: Bool {
         target.matches(channel: publicChat.activeChannel, peerID: privateChat.selectedPeerID)
@@ -81,14 +86,10 @@ struct EtEyoConversationScreen: View {
         }
         .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
         .background(Color.black)
+        .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(.hidden, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden()
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(action: goBack) { Image(systemName: "chevron.left") }
-                    .accessibilityLabel("Back").accessibilityIdentifier("eteyo.back")
-            }
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 0) {
                     Text(headerTitle).font(.system(size: 15, weight: .medium)).tracking(0.1).foregroundStyle(.white)
@@ -110,17 +111,18 @@ struct EtEyoConversationScreen: View {
         .tint(.white)
         .onAppear(perform: activate)
         .onDisappear { hasAppeared = false }
+        .onChange(of: isActive) { active in
+            if active { activate() }
+            else { hasAppeared = false; focused = false }
+        }
         .onChange(of: privateChat.selectedPeerID) { peer in
-            guard hasAppeared else { return }
+            guard hasAppeared, isActive else { return }
             if let peer {
                 // /msg, /group and notification routing all select through Bitchat.
-                target = .person(peer, privateChat.selectedHeaderState?.displayName ?? "Private chat")
-                markRead()
+                let conversation = EtEyoConversation.person(peer, privateChat.selectedHeaderState?.displayName ?? "Private chat")
+                if conversation.id != target.id { open(conversation) }
             } else if case .person = target {
-                if let channel = destination.publicChannel {
-                    target = destination
-                    channels.select(channel)
-                } else { dismiss() }
+                dismiss()
             }
         }
         .onChange(of: ready) { if $0 { markRead() } }
@@ -130,7 +132,7 @@ struct EtEyoConversationScreen: View {
             NavigationStack {
                 EtEyoChatsScreen { conversation in
                     showPeople = false
-                    if case .person(let peer, _) = conversation { privateChat.openConversation(for: peer) }
+                    open(conversation)
                 }
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showPeople = false } } }
             }
@@ -168,15 +170,13 @@ struct EtEyoConversationScreen: View {
     }
 
     private func activate() {
+        guard isActive else { return }
         hasAppeared = true
-        guard !didActivate else {
-            if let peer = privateChat.selectedPeerID {
-                target = .person(peer, privateChat.selectedHeaderState?.displayName ?? "Private chat")
-            }
+        guard !ready else {
             markRead()
             return
         }
-        didActivate = true
+        target = destination
         ui.setCurrentColorScheme(.dark)
         switch destination {
         case .mesh, .location:
@@ -192,19 +192,8 @@ struct EtEyoConversationScreen: View {
     }
 
     private func markRead() {
-        guard hasAppeared, ready, scenePhase == .active, case .person(let peer, _) = target else { return }
+        guard isActive, hasAppeared, ready, scenePhase == .active, case .person(let peer, _) = target else { return }
         privateChat.markMessagesAsRead(from: peer)
-    }
-
-    private func goBack() {
-        focused = false
-        if target.publicChannel == nil, destination.publicChannel != nil {
-            privateChat.endConversation()
-        } else {
-            hasAppeared = false
-            privateChat.endConversation()
-            dismiss()
-        }
     }
 
     private func sendMessage() {
