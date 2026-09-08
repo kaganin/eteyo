@@ -1,7 +1,7 @@
 import SwiftUI
 
 #if os(iOS)
-/// Berd's layered composer: the drawer moves while the input stays in front.
+/// The eteyo layered composer: the drawer moves while the input stays in front.
 struct EtEyoChatComposer: View {
     @Binding var text: String
     @Binding var command: String?

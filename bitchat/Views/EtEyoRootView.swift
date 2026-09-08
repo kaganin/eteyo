@@ -2,7 +2,7 @@
 //  EtEyoRootView.swift
 //  bitchat
 //
-//  The new EtEyo navigation shell. The existing bitchat interface remains
+//  The new eteyo navigation shell. The existing bitchat interface remains
 //  available as a development reference from the Debug tab.
 //
 
