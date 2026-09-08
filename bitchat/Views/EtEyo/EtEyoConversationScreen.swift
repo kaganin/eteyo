@@ -1,171 +1,229 @@
+import BitFoundation
 import SwiftUI
 
 #if os(iOS)
 struct EtEyoConversationScreen: View {
     let destination: EtEyoConversation
-    let color: Color
-    var participantSummary: String = "Private chat"
+    @State private var target: EtEyoConversation
     @EnvironmentObject private var publicChat: PublicChatModel
     @EnvironmentObject private var privateChat: PrivateConversationModel
-    @EnvironmentObject private var conversationUI: ConversationUIModel
+    @EnvironmentObject private var inbox: PrivateInboxModel
+    @EnvironmentObject private var ui: ConversationUIModel
     @EnvironmentObject private var channels: LocationChannelsModel
     @EnvironmentObject private var peers: PeerListModel
-    @State private var meshText = ""
-    @State private var meshCommand: String?
-    @EnvironmentObject private var store: EtEyoConversationStore
+    @EnvironmentObject private var drafts: EtEyoConversationStore
+    @EnvironmentObject private var chrome: AppChromeModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused: Bool
     @State private var composerHeight: CGFloat = 68
-    @State private var previewNotice: String?
+    @State private var notice: String?
+    @State private var hasAppeared = false
+    @State private var didActivate = false
+    @State private var showPeople = false
+    @State private var showClearConfirmation = false
+    @State private var imageDestination: EtEyoConversation?
+    @State private var imagePreviewURL: URL?
 
-    private var isMesh: Bool { destination == .location("mesh") }
+    init(destination: EtEyoConversation) {
+        self.destination = destination
+        _target = State(initialValue: destination)
+    }
+
+    private var ready: Bool {
+        target.matches(channel: publicChat.activeChannel, peerID: privateChat.selectedPeerID)
+            && (target.publicChannel == nil || target.publicChannel == channels.selectedChannel)
+    }
+
+    private var headerTitle: String {
+        if case .person = target { return privateChat.selectedHeaderState?.displayName ?? target.title }
+        return target.title
+    }
 
     private var headerSubtitle: String {
-        guard isMesh else { return participantSummary }
-        let count = peers.reachableMeshPeerCount + 1
-        return count == 1 ? "1 person" : "\(count) people"
-    }
-
-    private struct TimelineMessage: Identifiable {
-        let id: String
-        let text: String
-        let date: Date
-        let sender: String
-        let isMine: Bool
-    }
-
-    private var messages: [TimelineMessage] {
-        if isMesh {
-            guard publicChat.activeChannel == .mesh else { return [] }
-            return publicChat.messages.map {
-                TimelineMessage(id: $0.id, text: $0.content, date: $0.timestamp,
-                                sender: $0.sender, isMine: conversationUI.isSentByCurrentUser($0))
+        guard ready else { return "Connecting…" }
+        switch target {
+        case .mesh: return EtEyoLabels.people(peers.reachableMeshPeerCount + 1)
+        case .location(let channel):
+            return EtEyoLabels.people(peers.participantCount(for: channel.geohash), level: channel.level)
+        case .person(let peer, _):
+            if let group = peers.groupRows.first(where: { $0.peerID == peer }) {
+                return EtEyoLabels.people(group.memberCount)
+            }
+            switch privateChat.selectedHeaderState?.availability {
+            case .bluetoothConnected: return "Bluetooth connected"
+            case .meshReachable: return "Reachable via mesh"
+            case .nostrAvailable: return "Available via internet"
+            case .offline: return "Offline"
+            case nil: return "Private chat"
             }
         }
-        return draft.messages.map {
-            TimelineMessage(id: $0.id.uuidString, text: $0.text, date: $0.date, sender: "", isMine: true)
-        }
     }
 
-    private func sendMessage() {
-        guard isMesh else { store.send(to: destination); return }
-        let value = meshText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
-        guard publicChat.activeChannel == .mesh, privateChat.selectedPeerID == nil else {
-            previewNotice = "Reopen mesh before sending a message."
-            return
-        }
-        let alias = value.split(whereSeparator: { $0.isWhitespace }).first?.lowercased()
-        if alias == "/msg" || alias == "/group" {
-            previewNotice = "Private and group chats will be connected in the next step."
-            return
-        }
-        conversationUI.sendMessage(value)
-        meshText = ""
+    private var messages: [BitchatMessage] {
+        guard ready else { return [] }
+        if case .person(let peer, _) = target { return inbox.messages(for: peer) }
+        return publicChat.messages
     }
-
-    private var draft: EtEyoConversationDraft { store.draft(for: destination) }
 
     private var text: Binding<String> {
-        if isMesh { return $meshText }
-        return Binding(get: { draft.text }, set: { value in
-            var updated = draft
-            updated.text = value
-            store.update(updated, for: destination)
-        })
-    }
-
-    private var command: Binding<String?> {
-        if isMesh { return $meshCommand }
-        return Binding(get: { draft.command }, set: { value in
-            var updated = draft
-            updated.command = value
-            store.update(updated, for: destination)
-        })
+        Binding(get: { drafts.text(for: target) }, set: { drafts.update($0, for: target) })
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .bottom) {
-                timeline
-                    .padding(.bottom, composerHeight)
-
-                EtEyoChatComposer(
-                    text: text,
-                    command: command,
-                    focused: $focused,
-                    send: sendMessage,
-                    attach: { previewNotice = "Attachments aren't available in this preview yet." },
-                    heightChanged: { composerHeight = $0 }
-                )
-            }
-            .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
+        ZStack(alignment: .bottom) {
+            timeline.padding(.bottom, composerHeight)
+            EtEyoChatComposer(text: text, focused: $focused,
+                canSend: ready, canAttach: ready && ui.canSendMediaInCurrentContext,
+                send: sendMessage, attach: { focused = false; imageDestination = target },
+                heightChanged: { composerHeight = $0 })
         }
+        .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
         .background(Color.black)
-        .toolbar(.hidden, for: .tabBar)
-        .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(.hidden, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    focused = false
-                    store.save()
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .accessibilityLabel("Back")
-                .accessibilityIdentifier("eteyo.back")
+                Button(action: goBack) { Image(systemName: "chevron.left") }
+                    .accessibilityLabel("Back").accessibilityIdentifier("eteyo.back")
             }
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 0) {
-                    Text(destination.title)
-                        .font(.system(size: 15, weight: .medium))
-                        .tracking(0.1)
-                        .foregroundStyle(.white)
-                    Text(headerSubtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                    Text(headerTitle).font(.system(size: 15, weight: .medium)).tracking(0.1).foregroundStyle(.white)
+                    Text(headerSubtitle).font(.system(size: 12)).foregroundStyle(.secondary)
                 }
-                .lineLimit(1)
-                .frame(width: 174, height: 44)
+                .lineLimit(1).frame(width: 174, height: 44)
                 .modifier(EtEyoGlassSurface(radius: 22))
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button("Commands", systemImage: "slash.circle") {
-                        command.wrappedValue = nil
-                        text.wrappedValue = "/"
-                        focused = true
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .accessibilityLabel("More")
-                .accessibilityIdentifier("eteyo.more")
+                    Button("Commands", systemImage: "slash.circle") { text.wrappedValue = "/"; focused = true }
+                    Button("People", systemImage: "person.2") { focused = false; showPeople = true }
+                    Button("Clear chat", systemImage: "trash", role: .destructive) { showClearConfirmation = true }
+                        .disabled(!ready)
+                } label: { Image(systemName: "ellipsis") }
+                .accessibilityLabel("More").accessibilityIdentifier("eteyo.more")
             }
         }
         .tint(.white)
-        .navigationBarBackButtonHidden()
-        .onAppear {
-            if isMesh {
-                privateChat.endConversation()
-                channels.select(.mesh)
+        .onAppear(perform: activate)
+        .onDisappear { hasAppeared = false }
+        .onChange(of: privateChat.selectedPeerID) { peer in
+            guard hasAppeared else { return }
+            if let peer {
+                // /msg, /group and notification routing all select through Bitchat.
+                target = .person(peer, privateChat.selectedHeaderState?.displayName ?? "Private chat")
+                markRead()
+            } else if case .person = target {
+                if let channel = destination.publicChannel {
+                    target = destination
+                    channels.select(channel)
+                } else { dismiss() }
             }
         }
-        .onDisappear { store.save() }
-        .onChange(of: scenePhase) { if $0 != .active { store.save() } }
-        .alert("Preview", isPresented: Binding(
-            get: { previewNotice != nil },
-            set: { if !$0 { previewNotice = nil } }
-        )) {
-            Button("OK", role: .cancel) { previewNotice = nil }
-        } message: {
-            Text(previewNotice ?? "")
+        .onChange(of: ready) { if $0 { markRead() } }
+        .onChange(of: messages.count) { _ in markRead() }
+        .onChange(of: scenePhase) { if $0 == .active { markRead() } }
+        .sheet(isPresented: $showPeople) {
+            NavigationStack {
+                EtEyoChatsScreen { conversation in
+                    showPeople = false
+                    if case .person(let peer, _) = conversation { privateChat.openConversation(for: peer) }
+                }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showPeople = false } } }
+            }
         }
+        .fullScreenCover(item: $imageDestination) { capturedTarget in
+            ImagePickerView(sourceType: .photoLibrary) { image in
+                imageDestination = nil
+                guard let image else { return }
+                guard ready, target.id == capturedTarget.id else {
+                    notice = "The conversation changed. Select the photo again in the intended chat."
+                    return
+                }
+                ui.processSelectedImage(image)
+            }.ignoresSafeArea()
+        }
+        .sheet(isPresented: Binding(get: { imagePreviewURL != nil }, set: { if !$0 { imagePreviewURL = nil } })) {
+            if let url = imagePreviewURL { ImagePreviewView(url: url) }
+        }
+        .confirmationDialog("Clear this chat?", isPresented: $showClearConfirmation, titleVisibility: .visible) {
+            Button("Clear chat", role: .destructive) { if ready { ui.clearCurrentConversation() } }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("This removes the conversation's messages from this device.") }
+        .alert("Chat", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
+            Button("OK", role: .cancel) { notice = nil }
+        } message: { Text(notice ?? "") }
+        .confirmationDialog("Send without private media encryption?", isPresented: Binding(
+            get: { ui.legacyPrivateMediaConsentRequest != nil },
+            set: { if !$0 { resolveMediaConsent(false) } }
+        ), titleVisibility: .visible) {
+            Button("Send visible file", role: .destructive) { resolveMediaConsent(true) }
+            Button("Cancel", role: .cancel) { resolveMediaConsent(false) }
+        } message: {
+            Text("This peer's older client does not support encrypted private media. Mesh relays can see this file.")
+        }
+    }
+
+    private func activate() {
+        hasAppeared = true
+        guard !didActivate else {
+            if let peer = privateChat.selectedPeerID {
+                target = .person(peer, privateChat.selectedHeaderState?.displayName ?? "Private chat")
+            }
+            markRead()
+            return
+        }
+        didActivate = true
+        ui.setCurrentColorScheme(.dark)
+        switch destination {
+        case .mesh, .location:
+            privateChat.endConversation()
+            if let channel = destination.publicChannel { channels.select(channel) }
+        case .person(let peer, _):
+            privateChat.openConversation(for: peer)
+            if let selected = privateChat.selectedPeerID {
+                target = .person(selected, privateChat.selectedHeaderState?.displayName ?? destination.title)
+            } else { notice = "This conversation is currently unavailable." }
+        }
+        markRead()
+    }
+
+    private func markRead() {
+        guard hasAppeared, ready, scenePhase == .active, case .person(let peer, _) = target else { return }
+        privateChat.markMessagesAsRead(from: peer)
+    }
+
+    private func goBack() {
+        focused = false
+        if target.publicChannel == nil, destination.publicChannel != nil {
+            privateChat.endConversation()
+        } else {
+            hasAppeared = false
+            privateChat.endConversation()
+            dismiss()
+        }
+    }
+
+    private func sendMessage() {
+        guard ready else { notice = "Wait for this conversation to finish connecting."; return }
+        let value = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        // /nick belongs to app settings, not Bitchat's command processor.
+        let parts = value.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
+        if parts.first?.lowercased() == "/nick" {
+            guard parts.count == 2 else { notice = "Usage: /nick nickname"; return }
+            chrome.setNickname(String(parts[1]))
+            chrome.validateAndSaveNickname()
+        } else { ui.sendMessage(value) }
+        drafts.update("", for: target)
+    }
+
+    private func resolveMediaConsent(_ approved: Bool) {
+        guard let request = ui.legacyPrivateMediaConsentRequest else { return }
+        ui.resolveLegacyPrivateMediaConsent(requestID: request.id, approved: approved)
     }
 
     private var timeline: some View {
@@ -173,56 +231,54 @@ struct EtEyoConversationScreen: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     if messages.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "bubble.left.and.bubble.right")
-                                .font(.system(size: 28, weight: .light))
-                                .foregroundStyle(color)
-                            Text("Start a conversation")
-                                .font(.system(size: 17))
-                            Text(destination.title)
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 64)
+                        EtEyoEmptyState(title: ready ? "No messages yet" : "Connecting…", detail: headerTitle)
+                            .padding(.top, 40)
                     }
-                    ForEach(messages) { message in
-                        HStack {
-                            if message.isMine { Spacer(minLength: 40) }
-                            VStack(alignment: message.isMine ? .trailing : .leading, spacing: 5) {
-                                if !message.isMine {
-                                    Text(message.sender)
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Text(message.text)
-                                    .font(.system(size: 16))
-                                    .textSelection(.enabled)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 11)
-                                    .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 20))
-                                Text(message.date, style: .time)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.trailing, 4)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: message.isMine ? .trailing : .leading)
-                        .id(message.id)
+                    ForEach(messages, id: \.id) { message in
+                        messageRow(message).id(message.id)
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
+                .padding(.horizontal, 20).padding(.vertical, 16)
             }
             .scrollDismissesKeyboard(.interactively)
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
-            .onChange(of: messages.count) { _ in
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
+            .onChange(of: messages.last?.id) { _ in
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             .onChange(of: composerHeight) { _ in proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+    }
+
+    @ViewBuilder private func messageRow(_ message: BitchatMessage) -> some View {
+        if let media = ui.mediaAttachment(for: message) {
+            MediaMessageView(message: message, media: media, imagePreviewURL: $imagePreviewURL)
+        } else {
+            let mine = ui.isSelfSender(peerID: message.senderPeerID, displayName: message.sender)
+            HStack {
+                if mine { Spacer(minLength: 40) }
+                VStack(alignment: mine ? .trailing : .leading, spacing: 5) {
+                    if !mine {
+                        Button {
+                            if let peer = message.senderPeerID { privateChat.openConversation(for: peer) }
+                        } label: { Text(message.sender).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary) }
+                        .buttonStyle(.plain).disabled(message.sender == "system" || message.senderPeerID == nil)
+                    }
+                    Text(message.content).font(.system(size: 16)).textSelection(.enabled)
+                        .padding(.horizontal, 16).padding(.vertical, 11)
+                        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 20))
+                    HStack(spacing: 6) {
+                        Text(message.timestamp, style: .time).font(.system(size: 11)).foregroundStyle(.secondary)
+                        if mine && message.isPrivate { DeliveryStatusView(status: message.deliveryStatus) }
+                    }
+                    if mine, case .failed = message.deliveryStatus {
+                        Text(message.deliveryStatus.bitchatDescription).font(.caption).foregroundStyle(.red)
+                        Button("Retry") { if ready { ui.resendFailedPrivateMessage(message) } }.font(.caption)
+                    }
+                }
+                if !mine { Spacer(minLength: 20) }
+            }
+            .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         }
     }
 }

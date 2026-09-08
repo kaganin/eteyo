@@ -102,6 +102,18 @@ final class PeerListModel: ObservableObject {
         chatViewModel.geohashParticipantCount(for: geohash)
     }
 
+    /// Resolve the newest preview across ephemeral and stable routing aliases.
+    func lastMessage(for peerID: PeerID) -> BitchatMessage? {
+        let fingerprint = chatViewModel.getFingerprint(for: peerID)
+        return conversations.conversationsByID.compactMap { id, conversation -> BitchatMessage? in
+            guard case .direct(let handle) = id else { return nil }
+            let candidate = handle.routingPeerID
+            let sameIdentity = fingerprint.map { chatViewModel.getFingerprint(for: candidate) == $0 } ?? false
+            guard candidate == peerID || sameIdentity else { return nil }
+            return conversation.messages.last
+        }.max { $0.timestamp < $1.timestamp }
+    }
+
     func startConversation(with peerID: PeerID) {
         chatViewModel.startPrivateChat(with: peerID)
     }

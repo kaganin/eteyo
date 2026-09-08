@@ -4,8 +4,9 @@ import SwiftUI
 /// The eteyo layered composer: the drawer moves while the input stays in front.
 struct EtEyoChatComposer: View {
     @Binding var text: String
-    @Binding var command: String?
     @FocusState.Binding var focused: Bool
+    var canSend = true
+    var canAttach = true
     let send: () -> Void
     let attach: () -> Void
     let heightChanged: (CGFloat) -> Void
@@ -24,7 +25,7 @@ struct EtEyoChatComposer: View {
         EtEyoCommand(alias: "/msg", description: "send private message"),
         EtEyoCommand(alias: "/who", description: "see who’s online")
     ]
-    private var hasText: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || command != nil }
+    private var hasText: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var showsCommands: Bool { text.hasPrefix("/") && !text.contains(where: { $0.isWhitespace }) }
     private var motion: Animation { reduceMotion ? .easeOut(duration: 0.2) : .interactiveSpring(response: 0.28, dampingFraction: 0.9) }
     private var matchingCommands: [EtEyoCommand] {
@@ -44,7 +45,6 @@ struct EtEyoChatComposer: View {
                         }
                         ForEach(matchingCommands) { item in
                             Button {
-                                command = nil
                                 text = item.alias + " "
                                 focused = true
                             } label: {
@@ -118,6 +118,7 @@ struct EtEyoChatComposer: View {
                                 .foregroundStyle(.white.opacity(0.65))
                                 .frame(width: 42, height: 36)
                         }
+                        .disabled(!canAttach)
                         .accessibilityLabel("Attach")
                         .padding(.leading, 6)
                         .padding(.bottom, 4)
@@ -130,6 +131,7 @@ struct EtEyoChatComposer: View {
                                     .frame(width: 42, height: 36)
                                     .background(.white, in: Capsule())
                             }
+                            .disabled(!canSend)
                             .accessibilityLabel("Send message")
                             .accessibilityIdentifier("eteyo.send")
                             .padding(.bottom, 4)
@@ -157,22 +159,14 @@ struct EtEyoChatComposer: View {
         .animation(motion, value: focused)
         .animation(motion, value: hasText)
         .animation(motion, value: showsCommands)
-        .onAppear {
-            // Migrate drafts that used a separate command chip into editable text.
-            if let selected = command {
-                text = selected + " " + text
-                command = nil
-            }
-        }
     }
 
     private func measure(_ height: CGFloat) {
         inputHeight = height
-        heightChanged(height + 24)
+        heightChanged(height + 12)
     }
 
     private func openCommands() {
-        command = nil
         text = "/"
         focused = true
     }
