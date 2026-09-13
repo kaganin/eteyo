@@ -10,3 +10,6 @@ CODE_SIGN_STYLE = Automatic
 
 PRODUCT_BUNDLE_IDENTIFIER = chat.bitchat
 APP_GROUP_ID = group.chat.bitchat
+
+// Optional signing overrides for local Debug and Release builds.
+#include? "Local.xcconfig"

@@ -531,6 +531,7 @@
 				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = bitchatShareExtension/bitchatShareExtension.entitlements;
 				CODE_SIGN_STYLE = "$(CODE_SIGN_STYLE)";
+				DEVELOPMENT_TEAM = J7CDS26SR2;
 				INFOPLIST_FILE = bitchatShareExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = bitchat;
 				IPHONEOS_DEPLOYMENT_TARGET = "$(IPHONEOS_DEPLOYMENT_TARGET)";
@@ -539,7 +540,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "$(PRODUCT_BUNDLE_IDENTIFIER).ShareExtension";
+				PRODUCT_BUNDLE_IDENTIFIER = com.kaganyaldizkaya.bitchat.share.J7CDS26SR2;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -562,6 +563,7 @@
 				CODE_SIGN_ENTITLEMENTS = bitchat/bitchat.entitlements;
 				CODE_SIGN_STYLE = "$(CODE_SIGN_STYLE)";
 				DEVELOPMENT_ASSET_PATHS = bitchat/_PreviewHelpers;
+				DEVELOPMENT_TEAM = J7CDS26SR2;
 				ENABLE_PREVIEWS = NO;
 				INFOPLIST_FILE = bitchat/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = bitchat;
@@ -571,7 +573,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "$(PRODUCT_BUNDLE_IDENTIFIER)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.kaganyaldizkaya.bitchat;
 				PRODUCT_NAME = bitchat;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -620,6 +622,7 @@
 				CODE_SIGN_ENTITLEMENTS = bitchat/bitchat.entitlements;
 				CODE_SIGN_STYLE = "$(CODE_SIGN_STYLE)";
 				DEVELOPMENT_ASSET_PATHS = bitchat/_PreviewHelpers;
+				DEVELOPMENT_TEAM = J7CDS26SR2;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = bitchat/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = bitchat;
@@ -629,7 +632,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "$(PRODUCT_BUNDLE_IDENTIFIER)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.kaganyaldizkaya.bitchat;
 				PRODUCT_NAME = bitchat;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -842,6 +845,7 @@
 				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = bitchatShareExtension/bitchatShareExtension.entitlements;
 				CODE_SIGN_STYLE = "$(CODE_SIGN_STYLE)";
+				DEVELOPMENT_TEAM = J7CDS26SR2;
 				INFOPLIST_FILE = bitchatShareExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = bitchat;
 				IPHONEOS_DEPLOYMENT_TARGET = "$(IPHONEOS_DEPLOYMENT_TARGET)";
@@ -850,7 +854,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "$(PRODUCT_BUNDLE_IDENTIFIER).ShareExtension";
+				PRODUCT_BUNDLE_IDENTIFIER = com.kaganyaldizkaya.bitchat.share.J7CDS26SR2;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
