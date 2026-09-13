@@ -110,19 +110,20 @@ final class LocationChannelsModel: ObservableObject {
     }
 
     func openLocationChannel(for geohash: String) {
+        guard let channel = channel(for: geohash) else { return }
+        let isRegional = availableChannels.contains { $0.geohash == channel.geohash }
+        if !isRegional && !availableChannels.isEmpty {
+            markTeleported(for: channel.geohash, true)
+        }
+        select(.location(channel))
+    }
+
+    func channel(for geohash: String) -> GeohashChannel? {
         let normalized = geohash.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let allowed = Set("0123456789bcdefghjkmnpqrstuvwxyz")
         guard (2...12).contains(normalized.count),
-              normalized.allSatisfy({ allowed.contains($0) }) else {
-            return
-        }
-
-        let channel = GeohashChannel(level: level(forLength: normalized.count), geohash: normalized)
-        let isRegional = availableChannels.contains { $0.geohash == normalized }
-        if !isRegional && !availableChannels.isEmpty {
-            markTeleported(for: normalized, true)
-        }
-        select(.location(channel))
+              normalized.allSatisfy({ allowed.contains($0) }) else { return nil }
+        return GeohashChannel(level: level(forLength: normalized.count), geohash: normalized)
     }
 
     func teleport(to geohash: String) {

@@ -201,6 +201,8 @@ private struct EtEyoLocationsScreen: View {
     @EnvironmentObject private var channels: LocationChannelsModel
     @EnvironmentObject private var peers: PeerListModel
     @EnvironmentObject private var chrome: AppChromeModel
+    @State private var placeCode = ""
+    @State private var placeCodeError: String?
     private let levels: [GeohashChannelLevel] = [.block, .neighborhood, .city, .province, .region]
 
     private var meshDetail: String {
@@ -232,17 +234,79 @@ private struct EtEyoLocationsScreen: View {
                     .accessibilityIdentifier("eteyo.location.mesh")
                     ForEach(levels, id: \.self) { level in
                         let channel = channels.availableChannels.first { $0.level == level }
-                        Button {
-                            if let channel { open(.location(channel)) }
-                            else { requestLocation() }
-                        } label: {
-                            EtEyoLocationRow(title: level.eteyoTitle,
-                                people: channel.map { EtEyoLabels.people(peers.participantCount(for: $0.geohash), level: level) } ?? "",
-                                detail: channel.map { _ in channels.locationName(for: level) ?? "Resolving place name…" } ?? locationStatus,
-                                isActive: channel.map { channels.isSelected($0) } ?? false)
+                        HStack(spacing: 0) {
+                            Button {
+                                if let channel { open(.location(channel)) }
+                                else { requestLocation() }
+                            } label: {
+                                EtEyoLocationRow(title: level.eteyoTitle,
+                                    people: channel.map { EtEyoLabels.people(peers.participantCount(for: $0.geohash), level: level) } ?? "",
+                                    detail: channel.map { _ in channels.locationName(for: level) ?? "Resolving place name…" } ?? locationStatus,
+                                    isActive: channel.map { channels.isSelected($0) } ?? false)
+                            }
+                            if let channel {
+                                Button {
+                                    channels.toggleBookmark(channel.geohash)
+                                } label: {
+                                    Image(systemName: channels.isBookmarked(channel.geohash) ? "star.fill" : "star")
+                                        .foregroundStyle(channels.isBookmarked(channel.geohash) ? .yellow : .secondary)
+                                        .frame(width: 52, height: 52)
+                                }
+                                .accessibilityLabel(channels.isBookmarked(channel.geohash) ? "Remove saved place" : "Save place")
+                            }
                         }
                         .accessibilityIdentifier("eteyo.location.\(level.eteyoTitle)")
                     }
+                    if !channels.bookmarks.isEmpty {
+                        EtEyoLocationSectionTitle("Saved places")
+                        ForEach(channels.bookmarks, id: \.self) { geohash in
+                            if let channel = channels.channel(for: geohash) {
+                                HStack(spacing: 0) {
+                                    Button { open(.location(channel)) } label: {
+                                        EtEyoLocationRow(
+                                            title: channels.bookmarkNames[geohash] ?? "#\(geohash)",
+                                            people: EtEyoLabels.people(peers.participantCount(for: geohash), level: channel.level),
+                                            detail: "Saved place · #\(geohash)",
+                                            isActive: channels.isSelected(channel)
+                                        )
+                                    }
+                                    Button { channels.toggleBookmark(geohash) } label: {
+                                        Image(systemName: "star.fill")
+                                            .foregroundStyle(.yellow)
+                                            .frame(width: 52, height: 52)
+                                    }
+                                    .accessibilityLabel("Remove saved place")
+                                }
+                                .onAppear { channels.resolveBookmarkNameIfNeeded(for: geohash) }
+                            }
+                        }
+                    }
+                    EtEyoLocationSectionTitle("Join with a place code")
+                    HStack(spacing: 10) {
+                        TextField("Example: u33d", text: $placeCode)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)
+                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                            .accessibilityIdentifier("eteyo.location.placeCode")
+                        Button("Join") { joinPlaceCode() }
+                            .font(.body.weight(.semibold))
+                            .frame(minHeight: 44)
+                            .disabled(placeCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .padding(.horizontal, 20)
+                    if let placeCodeError {
+                        Text(placeCodeError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 20)
+                    }
+                    Text("Place codes open public conversations. Anyone who knows the code can join.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 4)
                     if channels.permissionState != .authorized || channels.availableChannels.isEmpty {
                         Button(channels.permissionState == .denied ? "Open location settings" : "Enable location channels", action: requestLocation)
                             .buttonStyle(.bordered).tint(.white).padding(.top, 20)
@@ -278,6 +342,31 @@ private struct EtEyoLocationsScreen: View {
         case .notDetermined: channels.enableAndRefresh()
         case .authorized: channels.refreshChannels()
         }
+    }
+
+    private func joinPlaceCode() {
+        guard let channel = channels.channel(for: placeCode) else {
+            placeCodeError = "Enter a valid place code with 2–12 characters."
+            return
+        }
+        placeCodeError = nil
+        channels.markTeleported(for: channel.geohash, true)
+        open(.location(channel))
+    }
+}
+
+private struct EtEyoLocationSectionTitle: View {
+    let title: LocalizedStringKey
+    init(_ title: LocalizedStringKey) { self.title = title }
+
+    var body: some View {
+        Text(title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+            .padding(.bottom, 8)
     }
 }
 
