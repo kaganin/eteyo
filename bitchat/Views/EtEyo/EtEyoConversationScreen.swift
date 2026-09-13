@@ -24,6 +24,7 @@ struct EtEyoConversationScreen: View {
     @State private var notice: String?
     @State private var hasAppeared = false
     @State private var showPeople = false
+    @State private var showPersonDetails = false
     @State private var showClearConfirmation = false
     @State private var imageDestination: EtEyoConversation?
     @State private var imagePreviewURL: URL?
@@ -77,6 +78,11 @@ struct EtEyoConversationScreen: View {
         Binding(get: { drafts.text(for: target) }, set: { drafts.update($0, for: target) })
     }
 
+    private var isPersonTarget: Bool {
+        if case .person = target { return true }
+        return false
+    }
+
     var body: some View {
         timeline
         .background(Color.black)
@@ -86,12 +92,22 @@ struct EtEyoConversationScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                VStack(spacing: 0) {
-                    Text(headerTitle).font(.system(size: 16, weight: .medium)).tracking(EtEyoTypography.tracking(for: 16)).foregroundStyle(.white)
-                    Text(headerSubtitle).font(.system(size: 13)).tracking(EtEyoTypography.tracking(for: 13)).foregroundStyle(.secondary)
+                Button {
+                    if case .person = target,
+                       privateChat.selectedHeaderState?.isGroupConversation == false {
+                        focused = false
+                        showPersonDetails = true
+                    }
+                } label: {
+                    VStack(spacing: 0) {
+                        Text(headerTitle).font(.system(size: 16, weight: .medium)).tracking(EtEyoTypography.tracking(for: 16)).foregroundStyle(.white)
+                        Text(headerSubtitle).font(.system(size: 13)).tracking(EtEyoTypography.tracking(for: 13)).foregroundStyle(.secondary)
+                    }
+                    .lineLimit(1).frame(width: 174, height: 44)
+                    .modifier(EtEyoGlassSurface(radius: 22, interactive: isPersonTarget))
                 }
-                .lineLimit(1).frame(width: 174, height: 44)
-                .modifier(EtEyoGlassSurface(radius: 22))
+                .buttonStyle(.plain)
+                .accessibilityHint(isPersonTarget ? "Shows contact details" : "")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -129,6 +145,21 @@ struct EtEyoConversationScreen: View {
                     open(conversation)
                 }
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showPeople = false } } }
+            }
+        }
+        .sheet(isPresented: $showPersonDetails) {
+            if let state = privateChat.selectedHeaderState, !state.isGroupConversation {
+                EtEyoPersonDetailScreen(
+                    state: state,
+                    isBlocked: isSelectedPersonBlocked,
+                    onBlock: {
+                        ui.block(peerID: state.conversationPeerID, displayName: state.displayName)
+                        privateChat.endConversation()
+                    },
+                    onUnblock: {
+                        ui.unblock(peerID: state.conversationPeerID, displayName: state.displayName)
+                    }
+                )
             }
         }
         .fullScreenCover(item: $imageDestination) { capturedTarget in
@@ -183,6 +214,14 @@ struct EtEyoConversationScreen: View {
             } else { notice = "This conversation is currently unavailable." }
         }
         markRead()
+    }
+
+    private var isSelectedPersonBlocked: Bool {
+        guard let state = privateChat.selectedHeaderState else { return false }
+        if state.conversationPeerID.isGeoChat || state.conversationPeerID.isGeoDM {
+            return peers.geohashPeople.first(where: { PeerID(nostr_: $0.id) == state.conversationPeerID })?.isBlocked ?? false
+        }
+        return peers.meshRows.first(where: { $0.peerID == state.headerPeerID })?.isBlocked ?? false
     }
 
     private func markRead() {

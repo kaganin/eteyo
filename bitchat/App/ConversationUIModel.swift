@@ -90,12 +90,18 @@ final class ConversationUIModel: ObservableObject {
         }
     }
 
-    /// Mesh counterpart of `block(peerID:displayName:)`. Resolves the unblock by
-    /// the tapped peer's stable identity so the exact row is unblocked — this
-    /// also works for offline peers, which the `/unblock <displayName>` command
-    /// cannot resolve.
     func unblock(peerID: PeerID, displayName: String) {
-        chatViewModel.unblockMeshPeer(peerID: peerID, displayName: displayName)
+        if peerID.isGeoChat || peerID.isGeoDM,
+           let full = chatViewModel.fullNostrHex(forSenderPeerID: peerID) {
+            chatViewModel.unblockGeohashUser(
+                pubkeyHexLowercased: full,
+                displayName: displayName
+            )
+        } else {
+            // Resolve the tapped mesh peer's stable identity so offline rows
+            // can be unblocked without relying on a display-name command.
+            chatViewModel.unblockMeshPeer(peerID: peerID, displayName: displayName)
+        }
     }
 
     func updateAutocomplete(for text: String, cursorPosition: Int) {
