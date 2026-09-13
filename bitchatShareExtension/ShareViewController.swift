@@ -33,15 +33,38 @@ final class ShareViewController: UIViewController {
         return l
     }()
 
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 22, weight: .semibold)
+        label.text = "Add to eteyo"
+        label.textAlignment = .center
+        return label
+    }()
+
+    private let iconView: UIImageView = {
+        let configuration = UIImage.SymbolConfiguration(pointSize: 30, weight: .medium)
+        let image = UIImage(systemName: "square.and.arrow.down", withConfiguration: configuration)
+        let view = UIImageView(image: image)
+        view.tintColor = .label
+        view.contentMode = .scaleAspectFit
+        return view
+    }()
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        view.addSubview(statusLabel)
+        statusLabel.text = "Preparing a preview…"
+        let stack = UIStackView(arrangedSubviews: [iconView, titleLabel, statusLabel])
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 12
+        view.addSubview(stack)
         NSLayoutConstraint.activate([
-            statusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            statusLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            statusLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.layoutMarginsGuide.leadingAnchor),
-            statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.layoutMarginsGuide.trailingAnchor)
+            iconView.heightAnchor.constraint(equalToConstant: 44),
+            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            stack.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor, constant: -16)
         ])
         processShare()
     }

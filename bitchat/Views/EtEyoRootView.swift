@@ -20,6 +20,7 @@ struct EtEyoRootView: View {
     @StateObject private var drafts = EtEyoConversationStore()
     @EnvironmentObject private var privateChat: PrivateConversationModel
     @EnvironmentObject private var chrome: AppChromeModel
+    @EnvironmentObject private var sharedContent: SharedContentImportModel
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -36,7 +37,13 @@ struct EtEyoRootView: View {
         .onAppear(perform: requestStartupPermissions)
         .onChange(of: scenePhase) { _ in requestStartupPermissions() }
         .onChange(of: chrome.bluetoothState) { _ in requestStartupPermissions() }
-        .onChange(of: path) { if $0.isEmpty { privateChat.endConversation() } }
+        .onChange(of: path) {
+            if $0.isEmpty { privateChat.endConversation() }
+            sharedContent.updateDestination(sharedContentDestination)
+        }
+        .onChange(of: channels.selectedChannel) { _ in
+            sharedContent.updateDestination(sharedContentDestination)
+        }
         .onChange(of: privateChat.selectedPeerID) { peer in
             #if DEBUG
             guard selectedTab != .debug else { return }
@@ -44,6 +51,18 @@ struct EtEyoRootView: View {
             // Notification and deep-link selections use the same conversation screen.
             guard path.isEmpty, let peer else { return }
             open(.person(peer, privateChat.selectedHeaderState?.displayName ?? "Private chat"))
+        }
+        .alert(
+            "Add shared content?",
+            isPresented: Binding(get: { sharedContent.offer != nil }, set: { _ in }),
+            presenting: sharedContent.offer
+        ) { offer in
+            Button("Discard", role: .destructive) {
+                sharedContent.cancel(destination: sharedContentDestination)
+            }
+            Button("Add to message") { acceptSharedContent(offer) }
+        } message: { offer in
+            Text("This will replace the draft for \(offer.destination.displayName). It will not be sent automatically.\n\n\(offer.payload.preview)")
         }
     }
 
@@ -84,6 +103,33 @@ struct EtEyoRootView: View {
             path = Array(path.prefix(through: index))
         } else {
             path.append(conversation)
+        }
+    }
+
+    private var sharedContentDestination: SharedContentDestination {
+        SharedContentDestination.resolve(
+            selectedPrivatePeerID: privateChat.selectedPeerID,
+            privateDisplayName: privateChat.selectedHeaderState?.displayName,
+            activeChannel: channels.selectedChannel
+        )
+    }
+
+    private func acceptSharedContent(_ offer: SharedContentOffer) {
+        guard let importedText = sharedContent.confirm(destination: sharedContentDestination),
+              let conversation = conversation(for: offer.destination) else { return }
+        drafts.update(importedText, for: conversation)
+        open(conversation)
+    }
+
+    private func conversation(for destination: SharedContentDestination) -> EtEyoConversation? {
+        switch destination {
+        case .mesh:
+            return .mesh
+        case .geohash(let geohash):
+            guard let channel = channels.channel(for: geohash) else { return nil }
+            return .location(channel)
+        case .privateConversation(let peerID, let displayName):
+            return .person(peerID, displayName)
         }
     }
 }
