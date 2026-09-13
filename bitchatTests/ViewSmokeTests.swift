@@ -13,7 +13,7 @@ import BitFoundation
 @testable import bitchat
 
 @MainActor
-private func makeSmokeViewModel() -> (viewModel: ChatViewModel, transport: MockTransport, identityManager: MockIdentityManager) {
+private func makeSmokeViewModel(locationManager: LocationChannelManager? = nil) -> (viewModel: ChatViewModel, transport: MockTransport, identityManager: MockIdentityManager) {
     let keychain = MockKeychain()
     let keychainHelper = MockKeychainHelper()
     let idBridge = NostrIdentityBridge(keychain: keychainHelper)
@@ -24,7 +24,8 @@ private func makeSmokeViewModel() -> (viewModel: ChatViewModel, transport: MockT
         keychain: keychain,
         idBridge: idBridge,
         identityManager: identityManager,
-        transport: transport
+        transport: transport,
+        locationManager: locationManager ?? .shared
     )
 
     return (viewModel, transport, identityManager)
@@ -53,8 +54,8 @@ private func makeSmokeLocationManager() -> LocationChannelManager {
 }
 
 @MainActor
-private func makeSmokeFeatureModels(for viewModel: ChatViewModel) -> SmokeFeatureModels {
-    let locationManager = makeSmokeLocationManager()
+private func makeSmokeFeatureModels(for viewModel: ChatViewModel, locationManager: LocationChannelManager? = nil) -> SmokeFeatureModels {
+    let locationManager = locationManager ?? makeSmokeLocationManager()
     let conversations = viewModel.conversations
     let publicChatModel = PublicChatModel(conversations: conversations)
     let locationChannelsModel = LocationChannelsModel(manager: locationManager)
@@ -269,6 +270,59 @@ private func makeTemporaryImageURL() throws -> URL {
 @Suite("View Smoke Tests", .serialized)
 @MainActor
 struct ViewSmokeTests {
+    #if os(iOS)
+    @Test(arguments: [DynamicTypeSize.large, .accessibility2])
+    func eteyoConversation_rendersReadableMessageHistory(textSize: DynamicTypeSize) async throws {
+        let locationManager = makeSmokeLocationManager()
+        let (viewModel, _, _) = makeSmokeViewModel(locationManager: locationManager)
+        let models = makeSmokeFeatureModels(for: viewModel, locationManager: locationManager)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        viewModel.activeChannel = .mesh
+        let peer = PeerID(str: "0102030405060708")
+        let samples = [
+            "Anyone up for a walk this afternoon?",
+            "Yes! Let's meet by the park entrance.",
+            "I can be there at three. Bringing coffee ☕️",
+            "Perfect. I'll bring something to eat.",
+            "The route looks lovely: https://example.com/walk",
+            "See you there!"
+        ]
+        for (index, content) in samples.enumerated() {
+            let mine = index.isMultiple(of: 2)
+            viewModel.conversations.append(BitchatMessage(
+                id: "eteyo-fixture-\(index)", sender: mine ? viewModel.nickname : "Alex",
+                content: content, timestamp: Date(timeIntervalSince1970: 1_789_294_800 + Double(index * 60)),
+                isRelay: false, senderPeerID: mine ? viewModel.meshService.myPeerID : peer
+            ), to: ConversationID(channelID: .mesh))
+        }
+        let view = installSmokeEnvironment(
+            NavigationStack {
+                EtEyoConversationScreen(destination: .mesh, path: .constant([.mesh]), open: { _ in })
+            }
+            .environmentObject(EtEyoConversationStore())
+            .environment(\.dynamicTypeSize, textSize)
+            .preferredColorScheme(.dark),
+            featureModels: models
+        )
+        let host = UIHostingController(rootView: view)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.layoutIfNeeded()
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let renderer = UIGraphicsImageRenderer(bounds: host.view.bounds)
+        let screenshot = renderer.image { _ in
+            host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+        }
+        let data = try #require(screenshot.pngData())
+        let suffix = textSize.isAccessibilitySize ? "large-text" : "standard"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("eteyo-ux-\(suffix).png")
+        try data.write(to: url)
+        print("ETEYO_SNAPSHOT=\(url.path)")
+        #expect(models.publicChatModel.messages.count == samples.count)
+    }
+    #endif
     @Test
     func fingerprintView_renders_verifiedAndPendingStates() async {
         let (viewModel, transport, _) = makeSmokeViewModel()

@@ -19,7 +19,8 @@ struct EtEyoConversationScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused: Bool
-    @State private var composerHeight: CGFloat = 68
+    @State private var timelineState = EtEyoTimelineState()
+    @State private var composerHeight: CGFloat = 62
     @State private var notice: String?
     @State private var hasAppeared = false
     @State private var showPeople = false
@@ -77,34 +78,27 @@ struct EtEyoConversationScreen: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            timeline.padding(.bottom, composerHeight)
-            EtEyoChatComposer(text: text, focused: $focused,
-                canSend: ready, canAttach: ready && ui.canSendMediaInCurrentContext,
-                send: sendMessage, attach: { focused = false; imageDestination = target },
-                heightChanged: { composerHeight = $0 })
-        }
-        .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
+        timeline
         .background(Color.black)
+        .background(EtEyoNavigationAppearance())
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(.hidden, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 0) {
-                    Text(headerTitle).font(.system(size: 15, weight: .medium)).tracking(0.1).foregroundStyle(.white)
-                    Text(headerSubtitle).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(headerTitle).font(.system(size: 16, weight: .medium)).tracking(EtEyoTypography.tracking(for: 16)).foregroundStyle(.white)
+                    Text(headerSubtitle).font(.system(size: 13)).tracking(EtEyoTypography.tracking(for: 13)).foregroundStyle(.secondary)
                 }
                 .lineLimit(1).frame(width: 174, height: 44)
                 .modifier(EtEyoGlassSurface(radius: 22))
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button("Commands", systemImage: "slash.circle") { text.wrappedValue = "/"; focused = true }
                     Button("People", systemImage: "person.2") { focused = false; showPeople = true }
                     Button("Clear chat", systemImage: "trash", role: .destructive) { showClearConfirmation = true }
                         .disabled(!ready)
-                } label: { Image(systemName: "ellipsis") }
+                } label: { Image("EtEyo-more").renderingMode(.template) }
                 .accessibilityLabel("More").accessibilityIdentifier("eteyo.more")
             }
         }
@@ -192,7 +186,8 @@ struct EtEyoConversationScreen: View {
     }
 
     private func markRead() {
-        guard isActive, hasAppeared, ready, scenePhase == .active, case .person(let peer, _) = target else { return }
+        guard isActive, hasAppeared, ready, timelineState.followsLatest, scenePhase == .active,
+              case .person(let peer, _) = target else { return }
         privateChat.markMessagesAsRead(from: peer)
     }
 
@@ -216,59 +211,182 @@ struct EtEyoConversationScreen: View {
     }
 
     private var timeline: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    if messages.isEmpty {
-                        EtEyoEmptyState(title: ready ? "No messages yet" : "Connecting…", detail: headerTitle)
-                            .padding(.top, 40)
+        GeometryReader { viewport in
+            let viewportHeight = viewport.size.height
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 12) {
+                            if messages.isEmpty {
+                                EtEyoEmptyState(title: ready ? String(localized: "Start a conversation") : String(localized: "Opening conversation…"),
+                                    detail: emptyConversationDetail)
+                                    .padding(.top, 48)
+                            }
+                            ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                                if index == 0 || !Calendar.current.isDate(messages[index - 1].timestamp, inSameDayAs: message.timestamp) {
+                                    Text(message.timestamp, format: .dateTime.day().month().year())
+                                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                                }
+                                messageRow(message).id(message.id)
+                            }
+                        }
+                        // Keep the anchor outside the lazy stack so geometry still exists
+                        // while reading older messages far from the bottom.
+                        Color.clear.frame(height: composerHeight + 1).id("bottom")
+                            .onGeometryChange(for: Bool.self) { anchor in
+                                anchor.frame(in: .named("eteyo.timeline")).maxY <= viewportHeight + 44
+                            } action: { nearBottom in
+                                guard nearBottom != timelineState.followsLatest else { return }
+                                timelineState.updateViewport(isNearBottom: nearBottom)
+                                if nearBottom { markRead() }
+                            }
                     }
-                    ForEach(messages, id: \.id) { message in
-                        messageRow(message).id(message.id)
-                    }
-                    Color.clear.frame(height: 1).id("bottom")
+                    .padding(.horizontal, 16).padding(.vertical, 16)
                 }
-                .padding(.horizontal, 20).padding(.vertical, 16)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    EtEyoChatComposer(text: text, focused: $focused,
+                        canSend: ready, canAttach: ready && isActive && ui.canSendMediaInCurrentContext,
+                        send: sendMessage, attach: { focused = false; imageDestination = target },
+                        sendVoiceNote: { url in
+                            guard ready, isActive else { return }
+                            ui.sendVoiceNote(at: url)
+                        })
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
+                }
+                .coordinateSpace(name: "eteyo.timeline")
+                .scrollDismissesKeyboard(.interactively)
+                .overlay(alignment: .bottomTrailing) {
+                    if !timelineState.followsLatest && !messages.isEmpty {
+                        Button { scrollToLatest(proxy, animated: true) } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.down")
+                                Text(timelineState.unseenCount == 0
+                                    ? String(localized: "Latest messages")
+                                    : String(localized: "\(timelineState.unseenCount) new messages"))
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 16).frame(minHeight: 44)
+                            .background(.white, in: Capsule()).foregroundStyle(.black)
+                            .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
+                        }
+                        .buttonStyle(EtEyoPressStyle())
+                        .accessibilityIdentifier("eteyo.latestMessages")
+                        .padding(16)
+                        .padding(.bottom, composerHeight)
+                    }
+                }
+                .onAppear { observeMessages(proxy) }
+                .onChange(of: messages.map(\.id)) { _ in observeMessages(proxy) }
+                .onChange(of: composerHeight) { _ in
+                    if timelineState.followsLatest { scrollToLatest(proxy, animated: false) }
+                }
             }
-            .scrollDismissesKeyboard(.interactively)
-            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
-            .onChange(of: messages.last?.id) { _ in
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
-            .onChange(of: composerHeight) { _ in proxy.scrollTo("bottom", anchor: .bottom) }
         }
+        .clipped()
+    }
+
+    private var emptyConversationDetail: String {
+        switch target {
+        case .mesh: return String(localized: "Say hello to people nearby. Messages travel over Bluetooth.")
+        case .location: return String(localized: "This is a public conversation. Anyone in this channel can read and reply.")
+        case .person: return String(localized: "Send a message to start chatting.")
+        }
+    }
+
+    private func observeMessages(_ proxy: ScrollViewProxy) {
+        let latestIsOwn = messages.last.map {
+            ui.isSelfSender(peerID: $0.senderPeerID, displayName: $0.sender)
+        } ?? false
+        if timelineState.updateMessages(ids: messages.map(\.id), latestIsOwn: latestIsOwn) {
+            scrollToLatest(proxy, animated: false)
+        }
+    }
+
+    private func scrollToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
+        if !timelineState.followsLatest || timelineState.unseenCount > 0 {
+            timelineState.returnToLatest()
+        }
+        withAnimation(animated && !reduceMotion ? .easeOut(duration: 0.2) : nil) {
+            proxy.scrollTo("bottom", anchor: .bottom)
+        }
+        markRead()
     }
 
     @ViewBuilder private func messageRow(_ message: BitchatMessage) -> some View {
         if let media = ui.mediaAttachment(for: message) {
             MediaMessageView(message: message, media: media, imagePreviewURL: $imagePreviewURL)
+        } else if message.sender == "system" {
+            Text(message.content).font(.footnote).foregroundStyle(.secondary)
+                .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 6)
         } else {
             let mine = ui.isSelfSender(peerID: message.senderPeerID, displayName: message.sender)
             HStack {
-                if mine { Spacer(minLength: 40) }
+                if mine { Spacer(minLength: 36) }
                 VStack(alignment: mine ? .trailing : .leading, spacing: 5) {
                     if !mine {
-                        Button {
-                            if let peer = message.senderPeerID { privateChat.openConversation(for: peer) }
-                        } label: { Text(message.sender).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary) }
-                        .buttonStyle(.plain).disabled(message.sender == "system" || message.senderPeerID == nil)
+                        HStack(spacing: 5) {
+                            Button {
+                                if let peer = message.senderPeerID { privateChat.openConversation(for: peer) }
+                            } label: { Text(message.sender).font(.footnote.weight(.medium)) }
+                            .buttonStyle(.plain).disabled(message.senderPeerID == nil)
+                            if ui.showsVerifiedSeal(for: message) {
+                                Image(systemName: "checkmark.seal.fill").font(.caption)
+                                    .accessibilityLabel("Verified sender")
+                            }
+                        }
+                        .foregroundStyle(.secondary).padding(.horizontal, 12)
                     }
-                    Text(message.content).font(.system(size: 16)).textSelection(.enabled)
-                        .padding(.horizontal, 16).padding(.vertical, 11)
-                        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 20))
+                    Text(EtEyoMessageText.attributed(message.content)).font(.body)
+                        .tint(.white).textSelection(.enabled)
+                        .padding(.horizontal, 15).padding(.vertical, 11)
+                        .background(Color(white: mine ? 0.2 : 0.1), in: RoundedRectangle(cornerRadius: 20))
                     HStack(spacing: 6) {
-                        Text(message.timestamp, style: .time).font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(message.timestamp, style: .time).font(.caption2).foregroundStyle(.secondary)
                         if mine && message.isPrivate { DeliveryStatusView(status: message.deliveryStatus) }
-                    }
+                    }.padding(.horizontal, 10)
                     if mine, case .failed = message.deliveryStatus {
                         Text(message.deliveryStatus.bitchatDescription).font(.caption).foregroundStyle(.red)
-                        Button("Retry") { if ready { ui.resendFailedPrivateMessage(message) } }.font(.caption)
+                        Button("Retry") { if ready { ui.resendFailedPrivateMessage(message) } }
+                            .font(.subheadline.weight(.medium)).frame(minHeight: 44)
                     }
                 }
-                if !mine { Spacer(minLength: 20) }
+                .contextMenu {
+                    Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.content }
+                    if !mine, let peer = message.senderPeerID {
+                        Button("Message privately", systemImage: "bubble.left") { privateChat.openConversation(for: peer) }
+                        Button("Mention", systemImage: "at") {
+                            let separator = text.wrappedValue.isEmpty || text.wrappedValue.last?.isWhitespace == true ? "" : " "
+                            text.wrappedValue += separator + "@" + message.sender + " "
+                            focused = true
+                        }
+                        Button("Block person", systemImage: "hand.raised", role: .destructive) {
+                            ui.block(peerID: peer, displayName: message.sender)
+                        }
+                    }
+                }
+                if !mine { Spacer(minLength: 36) }
             }
             .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         }
+    }
+}
+
+/// Treat remote text as text, not Markdown. Only ordinary web links are tappable.
+/// This avoids interpreting arbitrary URL schemes received from strangers.
+enum EtEyoMessageText {
+    private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    static func attributed(_ text: String) -> AttributedString {
+        let result = NSMutableAttributedString(string: text)
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        for match in detector?.matches(in: text, range: range) ?? [] {
+            guard let url = match.url, ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { continue }
+            result.addAttribute(.link, value: url, range: match.range)
+            result.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: match.range)
+        }
+        return AttributedString(result)
     }
 }
 #endif

@@ -50,14 +50,14 @@ struct EtEyoRootView: View {
     private var tabs: some View {
         TabView(selection: $selectedTab) {
             EtEyoLocationsScreen(open: open)
-                .tabItem { Label("Locations", systemImage: "location") }
+                .tabItem { Label("Locations", image: "EtEyo-location") }
                 .tag(Tab.locations)
             EtEyoChatsScreen(open: open)
-                .tabItem { Label("Chats", systemImage: "bubble.left.and.bubble.right") }
+                .tabItem { Label("Chats", image: "EtEyo-chat") }
                 .badge(chrome.hasUnreadPrivateMessages ? "" : nil)
                 .tag(Tab.chats)
             EtEyoSettingsScreen()
-                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tabItem { Label("Settings", image: "EtEyo-settings") }
                 .tag(Tab.settings)
             #if DEBUG
             ContentView()
@@ -174,16 +174,16 @@ private struct EtEyoChatRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Text(row.name.hasPrefix("@") || row.peer.isGroup ? row.name : "@" + row.name)
-                    .font(.system(size: 15)).foregroundStyle(row.color).tracking(0.2)
+                    .font(.system(size: 16)).foregroundStyle(row.color).tracking(EtEyoTypography.tracking(for: 16))
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 if let date = row.date {
-                    Text(date, style: .time).font(.system(size: 13)).foregroundStyle(.secondary)
+                    Text(date, style: .time).font(.system(size: 13)).tracking(EtEyoTypography.tracking(for: 13)).foregroundStyle(.secondary)
                 }
             }
             .frame(minHeight: 18)
             HStack {
-                Text(row.message).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                Text(row.message).font(.system(size: 14)).tracking(EtEyoTypography.tracking(for: 14)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 8)
                 if row.unread {
                     Circle().fill(.white).frame(width: 8, height: 8).accessibilityLabel("Unread messages")
@@ -283,12 +283,12 @@ private struct EtEyoLocationRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text(title).font(.system(size: 15)).foregroundStyle(isActive ? Color.accentColor : .primary)
-                    .tracking(0.2).frame(minHeight: 18)
+                Text(title).font(.system(size: 16)).foregroundStyle(isActive ? Color.accentColor : .primary)
+                    .tracking(EtEyoTypography.tracking(for: 16)).frame(minHeight: 18)
                 Spacer(minLength: 8)
-                Text(people).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                Text(people).font(.system(size: 14)).tracking(EtEyoTypography.tracking(for: 14)).foregroundStyle(.secondary).lineLimit(1)
             }
-            Text(detail).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1).frame(minHeight: 16)
+            Text(detail).font(.system(size: 14)).tracking(EtEyoTypography.tracking(for: 14)).foregroundStyle(.secondary).lineLimit(1).frame(minHeight: 16)
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
         .contentShape(Rectangle())
@@ -296,11 +296,12 @@ private struct EtEyoLocationRow: View {
 }
 
 struct EtEyoScreenTitle: View {
-    let title: String
-    init(_ title: String) { self.title = title }
+    let title: LocalizedStringKey
+    @ScaledMetric(relativeTo: .largeTitle) private var size = 30
+    init(_ title: LocalizedStringKey) { self.title = title }
     var body: some View {
-        Text(title).font(.system(size: 30, weight: .light)).tracking(0.5)
-            .frame(height: 44, alignment: .leading).padding(.horizontal, 20)
+        Text(title).font(.system(size: size, weight: .light)).tracking(EtEyoTypography.tracking(for: size))
+            .frame(minHeight: 44, alignment: .leading).padding(.horizontal, 20)
     }
 }
 struct EtEyoEmptyState: View {
