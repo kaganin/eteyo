@@ -5,10 +5,19 @@ struct EtEyoSettingsScreen: View {
     @EnvironmentObject private var chrome: AppChromeModel
     @EnvironmentObject private var channels: LocationChannelsModel
     @EnvironmentObject private var drafts: EtEyoConversationStore
+    @EnvironmentObject private var peers: PeerListModel
+    @EnvironmentObject private var ui: ConversationUIModel
     @ScaledMetric(relativeTo: .body) private var bodyFontSize = 16
     @State private var nickname = ""
     @State private var hidePreviews = NotificationPrivacySettings.hideMessagePreviews
     @State private var showAdvanced = false
+    @State private var showPrivacy = false
+    @State private var showBlockedPeople = false
+    @State private var showAbout = false
+
+    private var blockedCount: Int {
+        peers.meshRows.filter(\.isBlocked).count + peers.geohashPeople.filter(\.isBlocked).count
+    }
 
     private func sectionHeader(_ title: LocalizedStringKey) -> some View {
         Text(title).modifier(EtEyoNativeTracking(size: 13, relativeTo: .footnote))
@@ -72,16 +81,20 @@ struct EtEyoSettingsScreen: View {
                 Section {
                     Toggle("Hide message previews", isOn: $hidePreviews)
                         .accessibilityIdentifier("eteyo.settings.hidePreviews")
+                    Button { showBlockedPeople = true } label: {
+                        LabeledContent("Blocked people", value: blockedCount.formatted())
+                    }
+                    Button("How eteyo protects your privacy") { showPrivacy = true }
                 } header: { sectionHeader("Privacy") } footer: {
                     Text("Keep message text and sender names out of notifications.")
                         .modifier(EtEyoNativeTracking(size: 13, relativeTo: .footnote))
                 }
                 Section {
-                    Button("More settings and app information") { showAdvanced = true }
+                    Link("Help and report a problem", destination: URL(string: "https://github.com/kaganin/eteyo/issues")!)
+                    Button("About eteyo") { showAbout = true }
+                    Button("Advanced diagnostics") { showAdvanced = true }
                         .accessibilityIdentifier("eteyo.settings.advanced")
-                    Link("Powered by bitchat", destination: URL(string: "https://github.com/permissionlesstech/bitchat")!)
-                    LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
-                } header: { sectionHeader("eteyo") }
+                } header: { sectionHeader("Help and about") }
             }
             .font(.system(size: bodyFontSize))
             .modifier(EtEyoNativeTracking(size: 16, relativeTo: .body))
@@ -101,6 +114,126 @@ struct EtEyoSettingsScreen: View {
                 showAdvanced = false
                 chrome.panicClearAllData()
             })
+        }
+        .sheet(isPresented: $showPrivacy) { EtEyoPrivacyScreen() }
+        .sheet(isPresented: $showAbout) { EtEyoAboutScreen() }
+        .sheet(isPresented: $showBlockedPeople) {
+            EtEyoBlockedPeopleScreen(
+                meshRows: peers.meshRows.filter(\.isBlocked),
+                geohashRows: peers.geohashPeople.filter(\.isBlocked),
+                unblockMesh: { ui.unblock(peerID: $0.peerID, displayName: $0.displayName) },
+                unblockGeohash: { peers.unblockGeohashUser(pubkeyHexLowercased: $0.id, displayName: $0.displayName) }
+            )
+        }
+    }
+}
+
+private struct EtEyoPrivacyScreen: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Messages stay on your device").font(.headline)
+                        Text("Chat history is temporary and is not stored in an eteyo account.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                } icon: { Image(systemName: "iphone") }
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Private chats are encrypted").font(.headline)
+                        Text("Verify a contact in person when identity matters.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                } icon: { Image(systemName: "lock.shield") }
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Location channels are public").font(.headline)
+                        Text("A place code describes an area. Anyone in that channel can read public messages.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                } icon: { Image(systemName: "location") }
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Nearby devices can detect activity").font(.headline)
+                        Text("Bluetooth mesh reveals that an eteyo-compatible app is active to devices in radio range.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                } icon: { Image(systemName: "antenna.radiowaves.left.and.right") }
+            }
+            .navigationTitle("Your privacy")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+private struct EtEyoAboutScreen: View {
+    @Environment(\.dismiss) private var dismiss
+    private var version: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—" }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("eteyo").font(.largeTitle.weight(.light))
+                        Text("Private conversations nearby and around the world, powered by open protocols.")
+                            .font(.body).foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 12)
+                    LabeledContent("Version", value: version)
+                }
+                Section("Open source") {
+                    Link("View eteyo on GitHub", destination: URL(string: "https://github.com/kaganin/eteyo")!)
+                    Link("Built on bitchat", destination: URL(string: "https://github.com/permissionlesstech/bitchat")!)
+                }
+            }
+            .navigationTitle("About")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+private struct EtEyoBlockedPeopleScreen: View {
+    let meshRows: [MeshPeerRow]
+    let geohashRows: [GeohashPersonRow]
+    let unblockMesh: (MeshPeerRow) -> Void
+    let unblockGeohash: (GeohashPersonRow) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if meshRows.isEmpty && geohashRows.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "person.crop.circle.badge.checkmark").font(.largeTitle)
+                        Text("No blocked people").font(.headline)
+                        Text("People you block will appear here.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 32)
+                }
+                ForEach(meshRows) { row in
+                    blockedRow(name: row.displayName) { unblockMesh(row) }
+                }
+                ForEach(geohashRows) { row in
+                    blockedRow(name: row.displayName) { unblockGeohash(row) }
+                }
+            }
+            .navigationTitle("Blocked people")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func blockedRow(name: String, unblock: @escaping () -> Void) -> some View {
+        HStack {
+            Text(name)
+            Spacer()
+            Button("Unblock", action: unblock).buttonStyle(.bordered)
         }
     }
 }
