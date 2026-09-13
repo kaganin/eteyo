@@ -205,17 +205,24 @@ private struct EtEyoLocationsScreen: View {
 
     private var meshDetail: String {
         switch chrome.bluetoothState {
-        case .poweredOn: return "bluetooth"
-        case .poweredOff: return "Bluetooth is off"
-        case .unauthorized: return "Bluetooth permission needed"
-        case .unsupported: return "Bluetooth unavailable on this device"
-        default: return "Checking Bluetooth…"
+        case .poweredOn: return "Nearby chat over Bluetooth"
+        case .poweredOff: return "Turn on Bluetooth to use nearby chat"
+        case .unauthorized: return "Allow Bluetooth to use nearby chat"
+        case .unsupported: return "Nearby chat unavailable on this device"
+        default: return "Preparing nearby chat…"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             EtEyoScreenTitle("locations").padding(.bottom, 12)
+            EtEyoConnectionNotice(
+                bluetoothState: chrome.bluetoothState,
+                locationState: channels.permissionState,
+                torBlocked: chrome.torBlocked,
+                openBluetoothSettings: { SystemSettings.bluetooth.open() },
+                openLocationSettings: requestLocation
+            )
             ScrollView {
                 LazyVStack(spacing: 0) {
                     Button { open(.mesh) } label: {

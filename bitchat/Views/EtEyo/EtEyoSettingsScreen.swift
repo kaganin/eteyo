@@ -16,19 +16,19 @@ struct EtEyoSettingsScreen: View {
 
     private var bluetoothStatus: String {
         switch chrome.bluetoothState {
-        case .poweredOn: return "On"
-        case .poweredOff: return "Off"
+        case .poweredOn: return "Nearby chat ready"
+        case .poweredOff: return "Turned off"
         case .unauthorized: return "Permission needed"
-        case .unsupported: return "Unavailable"
+        case .unsupported: return "Not supported"
         case .resetting: return "Restarting…"
-        default: return "Checking…"
+        default: return "Preparing…"
         }
     }
 
     private var locationStatus: String {
         switch channels.permissionState {
-        case .authorized: return "Allowed"
-        case .denied: return "Not allowed"
+        case .authorized: return "Location channels ready"
+        case .denied: return "Access turned off"
         case .restricted: return "Restricted"
         case .notDetermined: return "Not enabled"
         }
@@ -65,7 +65,10 @@ struct EtEyoSettingsScreen: View {
                         Text("Tor is having trouble connecting.").font(.footnote)
                             .modifier(EtEyoNativeTracking(size: 13, relativeTo: .footnote)).foregroundStyle(.secondary)
                     }
-                } header: { sectionHeader("Connectivity") }
+                } header: { sectionHeader("Connectivity") } footer: {
+                    Text("Bluetooth powers nearby chat. Location access finds public channels around you. Tor protects online delivery.")
+                        .modifier(EtEyoNativeTracking(size: 13, relativeTo: .footnote))
+                }
                 Section {
                     Toggle("Hide message previews", isOn: $hidePreviews)
                         .accessibilityIdentifier("eteyo.settings.hidePreviews")
